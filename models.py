@@ -11,10 +11,12 @@ class Result(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     ticker = db.Column(db.String)
     result = db.Column(JSON)
+    userid = db.Column(db.Integer)
 
-    def __init__(self, ticker, result):
+    def __init__(self, ticker, result, userid):
         self.ticker = ticker
         self.result = result
+        self.userid = userid
 
     def __repr__(self):
         return '<id {}>'.format(self.id)
@@ -27,7 +29,13 @@ class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
-    phone = db.Column(db.Integer)
+    phone = db.Column(db.String)
+
+    def __init__(self, phone):
+        self.phone = phone
+
+    def __repr__(self):
+        return '<id {}>'.format(self.id)
 
 class Recent(db.Model):
     __tablename__ = 'recent'

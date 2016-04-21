@@ -25,6 +25,32 @@ q = Queue(connection=conn)
 
 from models import *
 
+
+def more_info(userid):
+    root = etree.Element('Response')
+    child = etree.Element('Message')
+    formatted_summary = Result.query.filter_by(userid=userid).order_by(Result.id.desc()).first()
+    # print(recent_ticker)
+    results = formatted_summary.result["formatted_quote_summary"]
+    # results = sorted(
+    #     result.result.items()
+    # )
+    # results = dict(results)
+    childtext = ""
+    for key in results:
+        s_key = str(key)
+        s_val = str(results[key])
+
+        childtext += s_key + " : " + s_val + "\n"
+    child.text = childtext
+
+
+    root.append(child)
+
+    s = etree.tostring(root, pretty_print=True)
+    return Response(s, mimetype='text/xml')
+
+
 def wait_for_xml(job_key):
     job = Job.fetch(job_key, connection=conn)
     if job.is_finished:
@@ -40,7 +66,7 @@ def wait_for_xml(job_key):
         if "errormsg" in results:
             root = etree.Element('Response')
             child = etree.Element('Message')
-            child.text = errormsg
+            child.text = results["errormsg"]
 
             root.append(child)
 
@@ -69,8 +95,11 @@ def wait_for_xml(job_key):
         return wait_for_xml(job_key)
 
 
-def scrape_stocks(ticker, render_xml):
-
+def scrape_stocks(ticker, render_xml, userid):
+    if render_xml:
+        userid = userid
+    else:
+        userid = 0
     errors = []
     print("scraping")
     base_url = 'http://finance.yahoo.com/q?d=t&s=' + ticker
@@ -90,12 +119,14 @@ def scrape_stocks(ticker, render_xml):
 
         try:
             from models import Result
+
             result = Result(
                 ticker=str(ticker),
                 result={
                     "errormsg": errormsg
 
-                }
+                },
+                userid=userid
             )
             # print(db)
             db.session.add(result)
@@ -120,7 +151,8 @@ def scrape_stocks(ticker, render_xml):
                 result={
                     "errormsg": errormsg
 
-                }
+                },
+                userid=userid
             )
             # print(db)
             db.session.add(result)
@@ -197,7 +229,8 @@ def scrape_stocks(ticker, render_xml):
                 "company": company,
                 "media": chart,
                 "formatted_quote_summary": formatted_quote_summary
-            }
+            },
+            userid=userid
         )
         # print(db)
         db.session.add(result)
@@ -219,19 +252,43 @@ def get_stocks():
 
     if request.args.get('Body'):
         ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
+        phone = request.args.get('From')
+        print(phone)
+        errors=[]
+
+        try:
+            from models import User
+            user = User(
+                phone=phone
+            )
+            # print(db)
+            db.session.add(user)
+            db.session.commit()
+            result = User.query.filter_by(phone=phone).first()
+            userid = result.id
+            print(userid)
+        except Exception as e:
+            print(str(e))
+            errors.append("Unable to add item to database.")
+            return {"error": errors}
         render_xml = True
     else:
         data = json.loads(request.data.decode())
         ticker = data["Body"]
         ticker = re.sub('[^a-zA-Z]+', '', ticker)
         render_xml = False
+        userid = 0
+
 
     ticker = ticker.upper()
     print(ticker)
 
+    if render_xml and ticker == "MOREINFO":
+        return more_info(userid)
+
 
     job = q.enqueue_call(
-        func=scrape_stocks, args=(ticker, render_xml,), result_ttl=5000
+        func=scrape_stocks, args=(ticker, render_xml, userid,), result_ttl=5000
     )
     print(job.get_id())
     if render_xml:
