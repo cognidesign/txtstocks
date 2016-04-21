@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html ng-app="TxtStocks">
   <head>
-    <title>Wordcount</title>
+    <title>TxtStocks</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="//netdna.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" rel="stylesheet" media="screen">
     <style>
@@ -10,18 +10,54 @@
       }
     </style>
   </head>
-  <body>
+  <body ng-controller="TxtStocksController">
     <div class="container">
-      <h1>TXTSTOCKS Leader Board</h1>
-        <table>
-            <tr>
-                <td>
+        <div class="row">
+            <div class="col-sm-5 col-sm-offset-1">
+                <h1>TXTSTOCKS</h1>
+                <br>
+                <form role="form" ng-submit="Results()">
+                    <div class="form-group">
+                        <input type="text" ng-model="ticker" name="ticker" class="form-control" id="ticker" placeholder="Enter Ticker..." style="max-width: 300px;" required>
+                    </div>
+                    {% raw %}
+                    <button type="submit" class="btn btn-primary"
+                            ng-disabled="loading">{{ submitButtonText }}</button>
+                    {% endraw %}
+                </form>
+            </div>
+            <div class="col-sm-5 col-sm-offset-1">
+                <h2>Stock Data</h2>
+                <br>
 
-                </td>
-            </tr>
-        </table>
+                <div id="results">
+                    <table class="table table-striped">
+                        <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Value</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% raw %}
+                        <tr ng-repeat="(key, val) in stockdata">
+                            <td>{{key}}</td>
+                            <td>{{val}}</td>
+                        </tr>
+                        {% endraw %}
+                        </tbody>
+                    </table>
+
+                </div>
+
+            </div>
+        </div>
+
     </div>
     <script src="//code.jquery.com/jquery-2.2.1.min.js"></script>
     <script src="//netdna.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
+    <script src="//ajax.googleapis.com/ajax/libs/angularjs/1.4.9/angular.min.js"></script>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+
   </body>
 </html>

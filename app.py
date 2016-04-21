@@ -1,32 +1,37 @@
 import os
 import requests
 import re
-from flask import Flask, render_template, request, Response
+
+import json
+
+
+from flask import Flask, render_template, request, Response, jsonify
 from flask.ext.sqlalchemy import SQLAlchemy
 
 from bs4 import BeautifulSoup
 from lxml import etree
+
+from rq import Queue
+from rq.job import Job
+from worker import conn
+
 
 app = Flask(__name__)
 app.config.from_object(os.environ['APP_SETTINGS'])
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-from models import Result
+q = Queue(connection=conn)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+from models import *
 
-@app.route('/txt')
-def get_stocks():
-    ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
-    ticker = ticker.upper()
-    print(ticker)
-
+def scrape_stocks(ticker):
+    errors = []
+    print("scraping")
     base_url = 'http://finance.yahoo.com/q?d=t&s=' + ticker
     errormsg = ""
     try:
+
         rd = requests.get(base_url)
         html = rd.content.decode('utf-8', 'ignore')
         soup = BeautifulSoup(html, "lxml")
@@ -42,10 +47,25 @@ def get_stocks():
 
         s = etree.tostring(root, pretty_print=True)
 
-        print(s)
+        # print(s)
 
-        return Response(s, mimetype='text/xml')
+        try:
+            from models import Result
+            result = Result(
+                ticker=str(ticker),
+                result={
+                    "errormsg": errormsg
 
+                }
+            )
+            # print(db)
+            db.session.add(result)
+            db.session.commit()
+            return result.id
+        except Exception as e:
+            # print(str(e))
+            errors.append("Unable to add item to database.")
+            return {"error": errors}
 
     if error or suggest:
         if error:
@@ -60,18 +80,37 @@ def get_stocks():
 
         s = etree.tostring(root, pretty_print=True)
 
-        print(s)
+        try:
+            from models import Result
+            result = Result(
+                ticker=str(ticker),
+                result={
+                    "errormsg": errormsg
+
+                }
+            )
+            # print(db)
+            db.session.add(result)
+            db.session.commit()
+            return result.id
+        except Exception as e:
+            # print(str(e))
+            errors.append("Unable to add item to database.")
+            return {"error": errors}
 
     else:
         ask = soup.find_all(class_="time_rtq_ticker")[0].span.text.strip()
         if soup.find_all(class_="up_g time_rtq_content"):
             change = soup.find_all(class_="up_g time_rtq_content")[0].span.contents[1].strip()
-            percent_change = soup.find_all(class_="up_g time_rtq_content")[0].span.nextSibling.text.strip().replace("(","").replace(")", "")
+            percent_change = soup.find_all(class_="up_g time_rtq_content")[0].span.nextSibling.text.strip().replace("(",
+                                                                                                                    "").replace(
+                ")", "")
 
         if soup.find_all(class_="down_r time_rtq_content"):
             change = soup.find_all(class_="down_r time_rtq_content")[0].span.contents[1].strip()
             change = "-" + change
-            percent_change = soup.find_all(class_="down_r time_rtq_content")[0].span.nextSibling.text.strip().replace("(","").replace(")", "")
+            percent_change = soup.find_all(class_="down_r time_rtq_content")[0].span.nextSibling.text.strip().replace(
+                "(", "").replace(")", "")
             percent_change = "-" + percent_change
 
         company = soup.find_all(class_="title")[0].h2.text
@@ -87,7 +126,7 @@ def get_stocks():
 
         formatted_quote_summary = {}
 
-        chart = 'http://chart.finance.yahoo.com/t?s='+realticker+'&lang=en-US&region=US&width=450&height=270'
+        chart = 'http://chart.finance.yahoo.com/t?s=' + realticker + '&lang=en-US&region=US&width=450&height=270'
 
         for i in quote_summary2:
             formatted_quote_summary[str(i.th.text)] = str(i.td.text)
@@ -107,7 +146,6 @@ def get_stocks():
 
         message.append(body)
 
-
         media = etree.Element('Media')
 
         media.text = chart
@@ -119,9 +157,92 @@ def get_stocks():
         print(s)
         print(chart)
 
-    return Response(s, mimetype='text/xml')
+        # data = {}
+        # data['ticker'] = str(realticker)
+        # data['ask'] = str(ask)
+        # data['change'] = str(change)
+        # data['percent_change'] = str(percent_change)
+        # data['company'] = str(company)
+        # data['media'] = str(chart)
+        # data['formatted_quote_summary'] = formatted_quote_summary
+        # data['xml'] = s
+        # json_data = json.dumps(data)
+        # raw_words = [w for w in text if nonPunct.match(w)]
+    try:
+        from models import Result
+        result = Result(
+            ticker=str(ticker),
+            result={
+                "ask": ask,
+                "change": change,
+                "percent_change": percent_change,
+                "company": company,
+                "media": chart,
+                "formatted_quote_summary": formatted_quote_summary
+            }
+        )
+        print(db)
+        db.session.add(result)
+        db.session.commit()
+        return result.id
+    except Exception as e:
+        print(str(e))
+        errors.append("Unable to add item to database.")
+        return {"error": errors}
 
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/txt', methods=['GET', 'POST'])
+def get_stocks():
+
+    if request.args.get('Body'):
+        ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
+    else:
+        data = json.loads(request.data.decode())
+        ticker = data["Body"]
+        ticker = re.sub('[^a-zA-Z]+', '', ticker)
+
+    ticker = ticker.upper()
+    print(ticker)
+
+
+    job = q.enqueue_call(
+        func=scrape_stocks, args=(ticker,), result_ttl=5000
+    )
+    print(job.get_id())
+
+    return job.get_id()
+    ### Temporary
+    # errormsg = "Invalid Command."
+    # root = etree.Element('Response')
+    # child = etree.Element('Message')
+    # child.text = errormsg
+    #
+    # root.append(child)
+    #
+    # s = etree.tostring(root, pretty_print=True)
+    ###
+
+    # return Response(s, mimetype='text/xml')
+
+
+@app.route("/results/<job_key>", methods=['GET'])
+def get_results(job_key):
+
+    job = Job.fetch(job_key, connection=conn)
+
+    if job.is_finished:
+        result = Result.query.filter_by(id=job.result).first()
+        results = sorted(
+            result.result.items()
+        )
+        return jsonify(results)
+    else:
+        return "Not yet received!", 202
 
 if __name__ == '__main__':
     app.run()

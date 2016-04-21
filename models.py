@@ -2,20 +2,26 @@ from app import db
 from sqlalchemy.dialects.postgresql import JSON
 
 
+
+
+
 class Result(db.Model):
     __tablename__ = 'results'
 
     id = db.Column(db.Integer, primary_key=True)
-    ticker = db.Column(db.String())
-    url = db.Column(db.String())
+    ticker = db.Column(db.String)
     result = db.Column(JSON)
 
-    def __init__(self, url, result):
-        self.url = url
+    def __init__(self, ticker, result):
+        self.ticker = ticker
         self.result = result
 
     def __repr__(self):
         return '<id {}>'.format(self.id)
+
+
+
+
 
 class User(db.Model):
     __tablename__ = 'users'
