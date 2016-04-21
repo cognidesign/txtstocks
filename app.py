@@ -3,7 +3,7 @@ import requests
 import re
 
 import json
-
+import time
 
 from flask import Flask, render_template, request, Response, jsonify
 from flask.ext.sqlalchemy import SQLAlchemy
@@ -25,7 +25,52 @@ q = Queue(connection=conn)
 
 from models import *
 
-def scrape_stocks(ticker):
+def wait_for_xml(job_key):
+    job = Job.fetch(job_key, connection=conn)
+    if job.is_finished:
+        result = Result.query.filter_by(id=job.result).first()
+        results = sorted(
+            result.result.items()
+        )
+        # print(results)
+        # print(type(results))
+        # print(type(results[0]))
+        results = dict(results)
+
+        if "errormsg" in results:
+            root = etree.Element('Response')
+            child = etree.Element('Message')
+            child.text = errormsg
+
+            root.append(child)
+
+            s = etree.tostring(root, pretty_print=True)
+        else:
+            root = etree.Element('Response')
+            message = etree.Element('Message')
+
+            root.append(message)
+            body = etree.Element('Body')
+            body.text = results["company"] + '\n' + "Asking Price: " + results["ask"] + '\n' + "Change: " + results["change"] + '\n' + "Percent Change: " + results["percent_change"]
+
+            message.append(body)
+
+            media = etree.Element('Media')
+
+            media.text = results["media"]
+
+            message.append(media)
+
+            s = etree.tostring(root, pretty_print=True)
+
+        return Response(s, mimetype='text/xml')
+    else:
+        time.sleep(1)
+        return wait_for_xml(job_key)
+
+
+def scrape_stocks(ticker, render_xml):
+
     errors = []
     print("scraping")
     base_url = 'http://finance.yahoo.com/q?d=t&s=' + ticker
@@ -39,13 +84,7 @@ def scrape_stocks(ticker):
         suggest = soup.find_all(id="yfi_sym_lookup_results")
     except:
         errormsg = "Invalid Command."
-        root = etree.Element('Response')
-        child = etree.Element('Message')
-        child.text = errormsg
 
-        root.append(child)
-
-        s = etree.tostring(root, pretty_print=True)
 
         # print(s)
 
@@ -72,13 +111,7 @@ def scrape_stocks(ticker):
             errormsg = error[0].h2.text
         if suggest:
             errormsg = "There are no results for the given search term."
-        root = etree.Element('Response')
-        child = etree.Element('Message')
-        child.text = errormsg
 
-        root.append(child)
-
-        s = etree.tostring(root, pretty_print=True)
 
         try:
             from models import Result
@@ -137,24 +170,9 @@ def scrape_stocks(ticker):
         print(company)
 
         print(formatted_quote_summary)
-        root = etree.Element('Response')
-        message = etree.Element('Message')
 
-        root.append(message)
-        body = etree.Element('Body')
-        body.text = ticker + '\n' + company + '\n' + "Asking Price: " + ask + '\n' + "Change: " + change + '\n' + "Percent Change: " + percent_change
 
-        message.append(body)
-
-        media = etree.Element('Media')
-
-        media.text = chart
-
-        message.append(media)
-
-        s = etree.tostring(root, pretty_print=True)
-
-        print(s)
+        # print(s)
         print(chart)
 
         # data = {}
@@ -181,7 +199,7 @@ def scrape_stocks(ticker):
                 "formatted_quote_summary": formatted_quote_summary
             }
         )
-        print(db)
+        # print(db)
         db.session.add(result)
         db.session.commit()
         return result.id
@@ -201,21 +219,27 @@ def get_stocks():
 
     if request.args.get('Body'):
         ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
+        render_xml = True
     else:
         data = json.loads(request.data.decode())
         ticker = data["Body"]
         ticker = re.sub('[^a-zA-Z]+', '', ticker)
+        render_xml = False
 
     ticker = ticker.upper()
     print(ticker)
 
 
     job = q.enqueue_call(
-        func=scrape_stocks, args=(ticker,), result_ttl=5000
+        func=scrape_stocks, args=(ticker, render_xml,), result_ttl=5000
     )
     print(job.get_id())
+    if render_xml:
+        job_key = job.get_id()
+        return wait_for_xml(job_key)
+    else:
+        return job.get_id()
 
-    return job.get_id()
     ### Temporary
     # errormsg = "Invalid Command."
     # root = etree.Element('Response')

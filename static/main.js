@@ -17,6 +17,7 @@
             success(function(results) {
                 $log.log(results);
                 getStockData(results);
+                $scope.stockdata = null;
                 $scope.loading = true;
                 $scope.tickererror = false;
 
@@ -35,11 +36,19 @@
                         $log.log(data, status);
                     } else if (status === 200){
                         $log.log(data);
+                        $scope.loading = false;
+                        $scope.submitButtonText = "Submit";
                         $scope.stockdata = data;
                         $timeout.cancel(timeout);
                         return false;
                     }
                     timeout = $timeout(poller, 2000);
+                }).
+                error(function(error) {
+                    $log.log(error);
+                    $scope.loading = false;
+                    $scope.submitButtonText = "Submit";
+                    $scope.tickererror = true;
                 });
             };
             poller();
