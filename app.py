@@ -14,7 +14,7 @@ from lxml import etree
 from rq import Queue
 from rq.job import Job
 from worker import conn
-
+from twilio.rest import TwilioRestClient
 
 app = Flask(__name__)
 app.config.from_object(os.environ['APP_SETTINGS'])
@@ -24,6 +24,75 @@ db = SQLAlchemy(app)
 q = Queue(connection=conn)
 
 from models import *
+
+def multiple_stocks(tickers, userid):
+    job_ids=[]
+    for ticker in tickers:
+        ticker = re.sub('[^a-zA-Z]+', '', ticker)
+        ticker = ticker.upper()
+        render_xml = True
+        job = q.enqueue_call(
+            func=scrape_stocks, args=(ticker, render_xml, userid,), result_ttl=5000
+        )
+        print(job.get_id())
+        job_ids.append(job.get_id())
+
+
+    send_multiple_texts(job_ids, userid)
+    root = etree.Element('Response')
+    child = etree.Element('Message')
+    child.text = "Thanks for using TXTSTOCKS!"
+
+    root.append(child)
+
+    s = etree.tostring(root, pretty_print=True)
+    return Response(s, mimetype='text/xml')
+
+
+def send_multiple_texts(job_ids, userid):
+    for task in job_ids:
+        job_key = task
+
+        def check_job(job_key):
+            job = Job.fetch(job_key, connection=conn)
+            if job.is_finished:
+                result = Result.query.filter_by(id=job.result).first()
+                results = sorted(
+                    result.result.items()
+                )
+                # print(results)
+                # print(type(results))
+                # print(type(results[0]))
+                results = dict(results)
+
+                if "errormsg" in results:
+                    print(results["errormsg"])
+                else:
+
+                    message = results["company"] + '\n' + "Asking Price: " + results["ask"] + '\n' + "Change: " + results[
+                        "change"] + '\n' + "Percent Change: " + results["percent_change"]
+
+                    print(message)
+
+                ACCOUNT_SID = app.config['TWILIO_ACCOUNT_SID']
+                AUTH_TOKEN = app.config['TWILIO_AUTH_TOKEN']
+
+                client = TwilioRestClient(ACCOUNT_SID, AUTH_TOKEN)
+
+                user = User.query.filter_by(id=userid).first()
+                to = user.phone
+                client.messages.create(
+                    to=to,
+                    from_="+14063185195",
+                    body=message,
+                )
+
+
+            else:
+                time.sleep(1)
+                check_job(job_key)
+        check_job(job_key)
+    return None
 
 
 def more_info(userid):
@@ -50,6 +119,50 @@ def more_info(userid):
     s = etree.tostring(root, pretty_print=True)
     return Response(s, mimetype='text/xml')
 
+
+def wait_for_job(job_key):
+    job = Job.fetch(job_key, connection=conn)
+    if job.is_finished:
+        result = Result.query.filter_by(id=job.result).first()
+        results = sorted(
+            result.result.items()
+        )
+        # print(results)
+        # print(type(results))
+        # print(type(results[0]))
+        results = dict(results)
+
+        if "errormsg" in results:
+            root = etree.Element('Response')
+            child = etree.Element('Message')
+            child.text = results["errormsg"]
+
+            root.append(child)
+
+            s = etree.tostring(root, pretty_print=True)
+        else:
+            root = etree.Element('Response')
+            message = etree.Element('Message')
+
+            root.append(message)
+            body = etree.Element('Body')
+            body.text = results["company"] + '\n' + "Asking Price: " + results["ask"] + '\n' + "Change: " + results[
+                "change"] + '\n' + "Percent Change: " + results["percent_change"]
+
+            message.append(body)
+
+            media = etree.Element('Media')
+
+            media.text = results["media"]
+
+            message.append(media)
+
+            s = etree.tostring(root, pretty_print=True)
+
+        return Response(s, mimetype='text/xml')
+    else:
+        time.sleep(1)
+        return wait_for_job(job_key)
 
 def wait_for_xml(job_key):
     job = Job.fetch(job_key, connection=conn)
@@ -249,9 +362,12 @@ def index():
 
 @app.route('/txt', methods=['GET', 'POST'])
 def get_stocks():
-
+    tickers = []
     if request.args.get('Body'):
-        ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
+        if request.args.get('Body').find(",") != -1:
+            tickers = request.args.get('Body').split(",")
+
+
         phone = request.args.get('From')
         print(phone)
         errors=[]
@@ -271,6 +387,11 @@ def get_stocks():
             print(str(e))
             errors.append("Unable to add item to database.")
             return {"error": errors}
+
+        if tickers:
+            return multiple_stocks(tickers, userid)
+
+        ticker = re.sub('[^a-zA-Z]+', '', request.args.get('Body'))
         render_xml = True
     else:
         data = json.loads(request.data.decode())
