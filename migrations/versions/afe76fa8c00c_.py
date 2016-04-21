@@ -1,14 +1,14 @@
 """AGtype - change result init to include userid
 
 Revision ID: afe76fa8c00c
-Revises: None
-Create Date: 2016-04-20 18:38:11.041002
+Revises: ae06aa7297e3
+Create Date: 2016-04-20 19:16:11.041002
 
 """
 
 # revision identifiers, used by Alembic.
 revision = 'afe76fa8c00c'
-down_revision = None
+down_revision = 'ae06aa7297e3'
 
 from alembic import op
 import sqlalchemy as sa
