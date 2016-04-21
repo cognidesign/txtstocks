@@ -7,6 +7,8 @@ class Config(object):
     TESTING = False
     CSRF_ENABLED = True
     SQLALCHEMY_DATABASE_URI = os.environ['DATABASE_URL']
+    TWILIO_ACCOUNT_SID = os.environ['ACCOUNT_SID']
+    TWILIO_AUTH_TOKEN = os.environ['AUTH_TOKEN']
 
 class ProductionConfig(Config):
     DEBUG = False
